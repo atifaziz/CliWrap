@@ -209,9 +209,26 @@ namespace CliWrap
         /// <summary>
         /// Executes CLI with given input, waits until completion asynchronously and returns output
         /// </summary>
+        public Task<ExecutionOutput> ExecuteAsync(ExecutionInput input) =>
+            ExecuteAsync(input, default(CancellationToken), default(IObserver<string>));
+
+        /// <summary>
+        /// Executes CLI with given input, waits until completion asynchronously and returns output
+        /// </summary>
+        public Task<ExecutionOutput> ExecuteAsync(ExecutionInput input,
+            CancellationToken cancellationToken,
+            IBufferHandler bufferHandler = null) =>
+            ExecuteAsync(input, cancellationToken,
+                         bufferHandler?.CreateOutputObserver(),
+                         bufferHandler?.CreateErrorObserver());
+
+        /// <summary>
+        /// Executes CLI with given input, waits until completion asynchronously and returns output
+        /// </summary>
         public async Task<ExecutionOutput> ExecuteAsync(ExecutionInput input,
-            CancellationToken cancellationToken = default(CancellationToken),
-            IBufferHandler bufferHandler = null)
+            CancellationToken cancellationToken,
+            IObserver<string> outputObserver = null,
+            IObserver<string> errorObserver = null)
         {
             input.GuardNotNull(nameof(input));
 
@@ -228,24 +245,25 @@ namespace CliWrap
                 var stdOutBuffer = new StringBuilder();
                 var stdErrBuffer = new StringBuilder();
 
+                void OnDataReceived(string line, IObserver<string> observer, StringBuilder buffer)
+                {
+                    if (line == null)
+                    {
+                        observer?.OnCompleted();
+                    }
+                    else
+                    {
+                        buffer.AppendLine(line);
+                        observer?.OnNext(line);
+                    }
+                }
+
                 // Wire events
                 process.OutputDataReceived += (sender, args) =>
-                {
-                    if (args.Data != null)
-                    {
-                        stdOutBuffer.AppendLine(args.Data);
-                        bufferHandler?.HandleStandardOutput(args.Data);
-                    }
-                };
+                    OnDataReceived(args.Data, outputObserver, stdOutBuffer);
 
                 process.ErrorDataReceived += (sender, args) =>
-                {
-                    if (args.Data != null)
-                    {
-                        stdErrBuffer.AppendLine(args.Data);
-                        bufferHandler?.HandleStandardError(args.Data);
-                    }
-                };
+                    OnDataReceived(args.Data, errorObserver, stdErrBuffer);
 
                 // Start process
                 process.Start();
